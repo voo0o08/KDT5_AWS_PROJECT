@@ -1,0 +1,2 @@
+# KDT5_AWS_PROJECT
+KDT AWS 수업 프로젝트 파일
