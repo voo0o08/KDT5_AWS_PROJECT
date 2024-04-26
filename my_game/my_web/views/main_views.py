@@ -111,7 +111,7 @@ bp = Blueprint("main", __name__, url_prefix="/")
 @bp.route("/")
 def index():
     # translate_text = Translation.query.order_by(Translation.id.desc()).first()
-    return render_template("tetris.html")
+    return render_template("index.html")
 
 
 # @bp.route("/translate", methods=["POST"])
