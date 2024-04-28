@@ -1,7 +1,7 @@
-from flask import Blueprint, redirect
+from flask import Blueprint, redirect, jsonify
 # from ..models import Translation
 # from my_web import db
-# from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+import pyautogui
 
 # Response, request => HTML 응답 요청을 처리하기 위함 
 # render_template => HTML 파일을 렌더링
@@ -12,97 +12,59 @@ import os, sys
 import numpy as np
 from threading import Thread # 스레드 생성에 사용 
 
+import torch
+import torch.nn as nn
+from PIL import Image
+import torchvision.transforms as transforms
 
-global capture,rec_frame, grey, switch, neg, face, rec, out 
-capture=0
-grey=0
-neg=0
-face=0
-switch=1
-rec=0
+# 모델 불러오기 시작 
+# 사전 학습된 모델 로딩
+import torchvision.models as models # 다양한모델패키지
+model = models.vgg16(pretrained=True)
+# 사전 훈련된 모델의 파라미터 학습 유무 설정 함수
+def set_parameter_requires_grad(model, feature_extract = True):
+    if feature_extract:
+        for param in model.parameters():
+            param.requires_grad = False # 학습하는 것을 방지
+set_parameter_requires_grad(model) # 함수 호출
 
-# 녹화 시 사용 
-def record(out):
-    global rec_frame
-    while(rec):
-        time.sleep(0.05) # 녹화 속도 조정 
-        out.write(rec_frame)
+class genreClassifier(nn.Module):
+    def __init__(self):
+        super(genreClassifier, self).__init__()
+        # VGG16의 특성 추출기 부분만 가져오기
+        self.features = model.features
+        # VGG16의 특성 추출기의 출력 크기 계산
+        self.num_features = 512 * 1 * 1  # VGG16은 입력 이미지를 224x224 크기로 처리하므로, 50x50으로 하면 위 공식에 따라 1x1로 출력됩니다.
         
-# 사전 훈련된 얼굴 감지 모델을 사용하여 얼굴만 잘린 프레임을 내놓음 
-def detect_face(frame):
-    global net
-    (h, w) = frame.shape[:2]
-    # cv2.dnn!!
-    blob = cv2.dnn.blobFromImage(cv2.resize(frame, (300, 300)), 1.0,
-        (300, 300), (104.0, 177.0, 123.0))   
-    net.setInput(blob)
-    detections = net.forward()
-    confidence = detections[0, 0, 0, 2]
+        # 이진 분류를 위한 새로운 fully connected layer 정의
+        self.fc = nn.Sequential(
+            nn.Linear(self.num_features, 4096),  # 특성 추출기의 출력 크기를 입력으로 받음
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(4096, 36),  # class_num 클래스 개수를 의미 
+            # nn.Sigmoid()  # 이진 분류를 위한 시그모이드 활성화 함수
+        )
 
-    if confidence < 0.5:            
-            return frame           
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)  # flatten
+        x = self.fc(x)
+        return x
 
-    box = detections[0, 0, 0, 3:7] * np.array([w, h, w, h])
-    (startX, startY, endX, endY) = box.astype("int")
-    try:
-        frame=frame[startY:endY, startX:endX]
-        (h, w) = frame.shape[:2]
-        r = 480 / float(h)
-        dim = ( int(w * r), 480)
-        frame=cv2.resize(frame,dim)
-    except Exception as e:
-        pass
-    return frame
+# 모델 생성
+model = genreClassifier()
 
+# 특성 추출기 부분의 파라미터를 고정시킴
+set_parameter_requires_grad(model)
 
-def gen_frames():  # generate frame by frame from camera
-    global out, capture,rec_frame
-    while True:
-        success, frame = camera.read() 
-        if success:
-            if(face):                
-                frame= detect_face(frame)
-            if(grey):
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            if(neg):
-                frame=cv2.bitwise_not(frame)    
-            if(capture):
-                capture=0
-                now = datetime.datetime.now()
-                p = os.path.sep.join(['shots', "shot_{}.png".format(str(now).replace(":",''))])
-                cv2.imwrite(p, frame)
-            
-            if(rec):
-                rec_frame=frame
-                frame= cv2.putText(cv2.flip(frame,1),"Recording...", (0,25), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,255),4)
-                frame=cv2.flip(frame,1)
-            
-                
-            try:
-                ret, buffer = cv2.imencode('.jpg', cv2.flip(frame,1))
-                frame = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            except Exception as e:
-                pass
-                
-        else:
-            pass
+# model.load_state_dict(torch.load('../static/model/model_VGG16.pth'))
+model.load_state_dict(torch.load('my_web/static/model/hand_model.pth'))
+model.eval()  # 모델 추론으로 제발 좀
+# 모델 불러오기 끝 
 
-
-#make shots directory to save pics
-try:
-    os.mkdir('./shots') # 없으면 생성 
-except OSError as error:
-    pass
-
-#Load pretrained face detection model    
-# net = cv2.dnn.readNetFromCaffe('./saved_model/deploy.prototxt.txt', './saved_model/res10_300x300_ssd_iter_140000.caffemodel')
-
-# 플라스크 앱 인스턴스 생성 
-# app = Flask(__name__, template_folder='./templates')
-
-camera = cv2.VideoCapture(0)
+import pickle # 출력 결과를 idx가 아닌 class 명으로 바꿔줘야 함 
+with open('my_web/static/model/class_to_idx.pickle', 'rb') as handle:
+    loaded_class_to_idx = pickle.load(handle)
 
 
 bp = Blueprint("main", __name__, url_prefix="/")
@@ -128,23 +90,37 @@ def index():
 #             db.session.commit()
 #     return redirect("/")
 
+@bp.route('/capture')
+def capture():
+    # 버튼 클릭에 대한 서버 측 작업 수행
+    # 여기에 실행하고자 하는 Python 코드 작성
+    # 예: 이미지 캡처, 데이터 처리 등
+    result = "a"
+    
+    # my_game 폴더에 바로 생성(웹 기준인 듯)
+    pyautogui.screenshot("my_web/static/img/screen_shot.png", region=(1870, 420, 2240-1870, 800-420))
+    
+    # 전처리할 이미지 불러오기
+    image = Image.open('my_web/static/img/screen_shot.png')
 
-# def translate_langs(select_language, original_text):
-#     curr_dir = os.getcwd()
-#     if select_language == "German":
-#         # 망한 모델 
-#         # model_dir1 = curr_dir + "/Bible_Translator/static/korean/result1/eng2kor2.pth"
-#         # vocab1 = curr_dir + "/Bible_Translator/static/korean/result1/vocab_transform.pth"
-        
-#         model_dir = curr_dir + "/Bible_Translator/static/korean/result2"
-#         tokenizer = AutoTokenizer.from_pretrained(model_dir)
-#         model = AutoModelForSeq2SeqLM.from_pretrained(model_dir)
-#         inputs = tokenizer(original_text, return_tensors="pt", padding=True)
-#         frenchs = model.generate(
-#             **inputs,
-#             max_length=128,
-#             num_beams=5,
-#         )
-#         translation_text = tokenizer.batch_decode(frenchs, skip_special_tokens=True)[0]
-        
-#     return translation_text
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+
+    preprocessing = transforms.Compose([
+        transforms.Resize((50, 50), interpolation=transforms.InterpolationMode.BILINEAR), # 1. resize
+        # transforms.CenterCrop(224), # 2. 중앙크롭
+        transforms.ToTensor(),  # 3. 값의 크기를 0~1로
+        transforms.Normalize(mean=mean, std=std) # 4. normalized
+    ])
+
+    # Point(x=1870, y=420) → 좌측 상단
+    # Point(x=2240, y=800) → 우측 하단 
+    processed_image = preprocessing(image)
+    processed_image = processed_image.unsqueeze(0)
+    print(processed_image.shape)
+
+    output = model(processed_image)
+    prediction = output.max(1, keepdim = True)[1].item()
+    prediction = loaded_class_to_idx[prediction]
+    # 결과를 JSON 형식으로 반환
+    return jsonify({"message": "캡처 완료", "prediction" : prediction})
