@@ -108,7 +108,7 @@
     border-radius: 15px; /* 테두리의 모서리를 둥글게 만듭니다. */
     display: block; /* 버튼을 블록 요소로 설정하여 가로 폭을 조정할 수 있게 함 */
     margin: 20px auto 0; /* 위쪽으로 20px 여백을 둔 후 가운데 정렬 */
-    width: 150px; /* 버튼의 가로 폭을 조정 */
+    width: 130px; /* 버튼의 가로 폭을 조정 */
     height: 50px; /* 버튼의 세로 높이를 조정 */
     background-color: #003230; /* 배경색 설정 */
     font-size: 30px; /* 글꼴 크기 설정 */
